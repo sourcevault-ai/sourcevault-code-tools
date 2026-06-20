@@ -46,8 +46,9 @@ def _handle_code_help_command(raw_args):
             "/code_search <repo_name> \"query\" [n_results]",
             "/code-context <repo_name> \"query\" [n_results]",
             "/code_context <repo_name> \"query\" [n_results]",
-            "/code-ask <repo_name> \"query\" \"question\" [n_results]",
-            "/code_ask <repo_name> \"query\" \"question\" [n_results]",
+            "/code-ask <repo_name> \"question\" [n_results]",
+            "/code_ask <repo_name> \"question\" [n_results]",
+            "/code-ask <repo_name> \"retrieval query\" \"question\" [n_results]",
             "/code-read <repo_name> <relative_path> [max_bytes]",
             "/code_read <repo_name> <relative_path> [max_bytes]",
             "",
@@ -120,19 +121,38 @@ def _handle_code_context_command(raw_args):
     return _format_context_command_output(result)
 
 
+_ASK_USAGE = (
+    'Usage: /code-ask <repo_name> "<question>" [n_results]\n'
+    '   or: /code-ask <repo_name> "<retrieval query>" "<question>" [n_results]'
+)
+
+
 def _handle_code_ask_command(raw_args, ctx=None):
     try:
         args = shlex.split(raw_args or "")
     except ValueError as error:
-        return f"Usage: /code-ask <repo_name> <query> <question> [n_results]\nError: {error}"
+        return f"{_ASK_USAGE}\nError: {error}"
 
-    if len(args) < 3:
-        return "Usage: /code-ask <repo_name> <query> <question> [n_results]"
+    if len(args) < 2:
+        return _ASK_USAGE
 
+    # The question is the only required input; it doubles as the retrieval
+    # query unless an explicit query is given (mirrors the dashboard).
+    # Forms: <repo> <question>            | <repo> <question> <n>
+    #        <repo> <query> <question>    | <repo> <query> <question> <n>
     repo_name = args[0]
-    query = args[1]
-    question = args[2]
-    n_results = args[3] if len(args) > 3 else 5
+    rest = args[1:]
+    n_results = 5
+    if len(rest) > 1 and rest[-1].isdigit():
+        n_results = rest[-1]
+        rest = rest[:-1]
+
+    if len(rest) == 1:
+        query = question = rest[0]
+    elif len(rest) == 2:
+        query, question = rest
+    else:
+        return _ASK_USAGE
 
     result = _search_context(repo_name, query, n_results)
     prompt = _format_ask_command_output(result, question=question)

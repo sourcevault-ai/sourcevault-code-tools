@@ -239,5 +239,57 @@ class TestMergeSearchResults(unittest.TestCase):
         self.assertEqual(plugin._merge_search_results(primary, failed), primary)
 
 
+
+
+class TestAskCommandForms(unittest.TestCase):
+    """Argument forms for /code-ask. _search_context is stubbed (no network)."""
+
+    def setUp(self):
+        self.commands = sys.modules["sourcevault_code_tools.commands"]
+        self.calls = []
+        self._real = self.commands._search_context
+
+        def stub(repo_name, query, n_results):
+            self.calls.append({"repo": repo_name, "query": query, "n": n_results})
+            return json.dumps({"ok": True, "repo_name": repo_name, "query": query, "results": [
+                {"file": "a.js", "chunk": 0, "content": "code", "preview": "code"},
+            ]})
+
+        self.commands._search_context = stub
+
+    def tearDown(self):
+        self.commands._search_context = self._real
+
+    def test_question_only(self):
+        out = plugin._handle_code_ask_command('myrepo "How does auth work?"')
+        self.assertEqual(self.calls[0]["query"], "How does auth work?")
+        self.assertEqual(self.calls[0]["n"], 5)
+        self.assertIn("How does auth work?", out)
+
+    def test_question_only_with_count(self):
+        plugin._handle_code_ask_command('myrepo "How does auth work?" 8')
+        self.assertEqual(self.calls[0]["query"], "How does auth work?")
+        self.assertEqual(self.calls[0]["n"], "8")
+
+    def test_query_and_question(self):
+        plugin._handle_code_ask_command('myrepo "hmac signature" "Is this replay-safe?"')
+        self.assertEqual(self.calls[0]["query"], "hmac signature")
+
+    def test_query_question_and_count(self):
+        plugin._handle_code_ask_command('myrepo "hmac" "Is this safe?" 9')
+        self.assertEqual(self.calls[0]["query"], "hmac")
+        self.assertEqual(self.calls[0]["n"], "9")
+
+    def test_too_few_args_shows_usage(self):
+        out = plugin._handle_code_ask_command("myrepo")
+        self.assertIn("Usage:", out)
+        self.assertEqual(self.calls, [])
+
+    def test_numeric_question_is_not_eaten_as_count(self):
+        # A lone trailing number with nothing else is the question, not n.
+        plugin._handle_code_ask_command('myrepo "404"')
+        self.assertEqual(self.calls[0]["query"], "404")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

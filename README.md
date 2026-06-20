@@ -31,7 +31,7 @@ Works in Hermes CLI, Telegram, and Hermes Desktop.
 | `/code-read <repo> <path>` | Read an exact file |
 | `/code-search <repo> "query"` | Hybrid semantic + literal search |
 | `/code-context <repo> "query"` | Retrieve a compact context pack |
-| `/code-ask <repo> "query" "question"` | Retrieve + answer with citations |
+| `/code-ask <repo> "question"` | Retrieve + answer with citations (add an optional `"query"` before the question to steer retrieval) |
 
 Telegram uses underscore forms (`/code_ask`, …).
 
@@ -124,8 +124,8 @@ exactly as `/code-repos` prints it (case-sensitive).
 # 4. Context pack — retrieve snippets, then ask follow-ups in plain chat
 /code-context hello-world "startup and initialization flow" 6
 
-# 5. Grounded Q&A — first string is the SEARCH query, second is the QUESTION
-/code-ask hello-world "input validation" "How are user inputs validated, and where could that fail?"
+# 5. Grounded Q&A — your question retrieves on its own; add a query first to steer
+/code-ask hello-world "How are user inputs validated, and where could that fail?"
 /code-ask hello-world "database connection setup" "Walk me through how a connection is opened, reused, and closed." 8
 ```
 
