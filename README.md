@@ -2,7 +2,7 @@
 
 # sourcevault-code-tools
 
-![tests](https://github.com/Ocasio-Perez/sourcevault-code-tools/actions/workflows/test.yml/badge.svg)
+![tests](https://github.com/sourcevault-ai/sourcevault-code-tools/actions/workflows/test.yml/badge.svg)
 
 A [Hermes Agent](https://github.com/nousresearch/hermes-agent) plugin that
 gives Hermes **persistent, private memory of your codebases** — semantic code
@@ -64,7 +64,7 @@ Clone (or download) this plugin, then copy the plugin folder into
 you cloned it, not `.`:
 
 ```bash
-git clone https://github.com/Ocasio-Perez/sourcevault-code-tools /tmp/sourcevault-code-tools
+git clone https://github.com/sourcevault-ai/sourcevault-code-tools /tmp/sourcevault-code-tools
 mkdir -p ~/.hermes/plugins
 cp -R /tmp/sourcevault-code-tools ~/.hermes/plugins/sourcevault-code-tools
 ```
