@@ -11,6 +11,15 @@ Everything runs on your machine over localhost; no source code leaves it.
 
 Works in Hermes CLI, Telegram, and Hermes Desktop.
 
+## Companion X/Twitter Repo Context
+
+For launch, support, or incident profiles, pair SourceVault code tools with
+[Hermes Tweet](https://github.com/Xquik-dev/hermes-tweet). Hermes Tweet can
+collect X/Twitter account, post, or trend context inside Hermes, while
+SourceVault can ground follow-up answers in the exact repository files and
+line citations behind the product or issue. Hermes Tweet is a third-party
+project maintained by Xquik-dev, not by this repository.
+
 ![Hermes /code-ask answering a question about a private repo with file-and-line citations](demo.gif)
 
 ```text
