@@ -69,6 +69,44 @@ def _read_file_command_output(result):
     return result
 
 
+def _format_history_command_output(result):
+    try:
+        parsed = json.loads(result)
+    except (TypeError, json.JSONDecodeError):
+        return result
+
+    if not isinstance(parsed, dict):
+        return result
+
+    if parsed.get("ok") is False or parsed.get("success") is False:
+        return result
+
+    results = parsed.get("results") or []
+    lines = [
+        parsed.get("summary")
+        or f"Found {len(results)} matching commit(s)",
+    ]
+
+    for index, item in enumerate(results, start=1):
+        short = item.get("short") or str(item.get("commit") or "")[:7] or "<unknown>"
+        meta = f"#{index} {short} ({item.get('date') or '?'}) {item.get('author') or ''}".rstrip()
+        if item.get("ai_authored"):
+            meta += " [ai]"
+        lines.append(meta)
+
+        subject = " ".join(str(item.get("subject") or "").split())
+        if subject:
+            lines.append(f"  {subject}")
+
+        preview = " ".join(str(item.get("preview") or "").split())
+        if preview and preview != subject:
+            if len(preview) > 180:
+                preview = f"{preview[:177]}..."
+            lines.append(f"  {preview}")
+
+    return "\n".join(lines)
+
+
 def _format_search_command_output(result):
     try:
         parsed = json.loads(result)

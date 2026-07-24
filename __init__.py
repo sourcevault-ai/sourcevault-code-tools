@@ -15,6 +15,7 @@ from .commands import (
     _handle_code_context_command,
     _handle_code_help_command,
     _handle_code_read_command,
+    _handle_code_history_command,
     _handle_code_repos_command,
     _handle_code_search_command,
     _handle_code_status_command,
@@ -43,8 +44,10 @@ from .helpers import (
 )
 from .transport import DEFAULT_READ_FILE_URL, DEFAULT_SEARCH_URL, _debug, _post_signed_json
 from .tools import (
+    _register_code_history_tool,
     _register_code_read_tool,
     _register_code_search_tool,
+    handle_code_history,
     handle_code_read_file,
     handle_code_search,
 )
@@ -62,6 +65,8 @@ def register(ctx):
     _register_code_read_tool(ctx, "code_read_file")
     _register_code_read_tool(ctx, "code_read")
     _register_code_read_tool(ctx, "sourcevault_read")
+    _register_code_history_tool(ctx, "code_history")
+    _register_code_history_tool(ctx, "sourcevault_history")
 
     _register_code_command(
         ctx,
@@ -86,6 +91,12 @@ def register(ctx):
         ("code-ask", "code_ask"),
         lambda raw_args: _handle_code_ask_command(raw_args, ctx),
         "Build a SourceVault code context prompt for a repo question.",
+    )
+    _register_code_command(
+        ctx,
+        ("code-history", "code_history"),
+        _handle_code_history_command,
+        "Search an indexed repo's git commit history.",
     )
     _register_code_command(
         ctx,

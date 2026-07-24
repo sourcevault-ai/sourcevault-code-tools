@@ -12,6 +12,7 @@ from .formatting import (
     _extract_json_object,
     _format_ask_command_output,
     _format_context_command_output,
+    _format_history_command_output,
     _format_search_command_output,
     _merge_search_results,
     _parse_successful_search_result,
@@ -19,7 +20,7 @@ from .formatting import (
 )
 from .helpers import _clean_repo_name
 from .transport import DEFAULT_READ_FILE_URL, DEFAULT_SEARCH_URL, _debug
-from .tools import handle_code_read_file, handle_code_search
+from .tools import handle_code_history, handle_code_read_file, handle_code_search
 
 
 def _register_code_command(ctx, names, handler, description):
@@ -49,6 +50,8 @@ def _handle_code_help_command(raw_args):
             "/code-ask <repo_name> \"question\" [n_results]",
             "/code_ask <repo_name> \"question\" [n_results]",
             "/code-ask <repo_name> \"retrieval query\" \"question\" [n_results]",
+            "/code-history <repo_name> \"question\" [n_results]",
+            "/code_history <repo_name> \"question\" [n_results]",
             "/code-read <repo_name> <relative_path> [max_bytes]",
             "/code_read <repo_name> <relative_path> [max_bytes]",
             "",
@@ -78,6 +81,26 @@ def _handle_code_read_command(raw_args):
     )
 
     return _read_file_command_output(result)
+
+
+def _handle_code_history_command(raw_args):
+    try:
+        args = shlex.split(raw_args or "")
+    except ValueError as error:
+        return f'Usage: /code-history <repo_name> "question" [n_results]\nError: {error}'
+
+    if len(args) < 2:
+        return 'Usage: /code-history <repo_name> "question" [n_results]'
+
+    result = handle_code_history(
+        {
+            "repo_name": args[0],
+            "question": args[1],
+            "n_results": args[2] if len(args) > 2 else 5,
+        }
+    )
+
+    return _format_history_command_output(result)
 
 
 def _handle_code_search_command(raw_args):

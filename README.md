@@ -32,6 +32,7 @@ Works in Hermes CLI, Telegram, and Hermes Desktop.
 | `/code-search <repo> "query"` | Hybrid semantic + literal search |
 | `/code-context <repo> "query"` | Retrieve a compact context pack |
 | `/code-ask <repo> "question"` | Retrieve + answer with citations (add an optional `"query"` before the question to steer retrieval) |
+| `/code-history <repo> "question"` | Search indexed git commit history (SourceVault v1.8+; index every commit via the dashboard's Full git history setting) |
 
 Telegram uses underscore forms (`/code_ask`, …).
 
@@ -41,8 +42,9 @@ Telegram uses underscore forms (`/code_ask`, …).
 > `/code-repos` to see the exact names.
 
 **LLM-callable tools** (for models that handle structured tool use):
-`code_search`, `code_read_file`, plus `sourcevault_search` / `sourcevault_read`
-aliases for Hermes Tool Search discoverability.
+`code_search`, `code_read_file`, and `code_history`, plus `sourcevault_search` /
+`sourcevault_read` / `sourcevault_history` aliases for Hermes Tool Search
+discoverability.
 
 ## Requires a SourceVault backend
 
@@ -97,6 +99,7 @@ Point the gateway at your SourceVault instance
 ```env
 CODE_SEARCH_URL=http://127.0.0.1:9000/api/search-codebase
 CODE_READ_FILE_URL=http://127.0.0.1:9000/api/read-file
+CODE_HISTORY_URL=http://127.0.0.1:9000/api/history-search
 CODE_SEARCH_HMAC_SECRET=<same value as the SourceVault server>
 ```
 
@@ -147,6 +150,7 @@ Usage notes:
 |---|---|---|
 | `CODE_SEARCH_URL` | `http://127.0.0.1:9000/api/search-codebase` | SourceVault search endpoint |
 | `CODE_READ_FILE_URL` | `http://127.0.0.1:9000/api/read-file` | SourceVault file-read endpoint |
+| `CODE_HISTORY_URL` | `http://127.0.0.1:9000/api/history-search` | SourceVault history-search endpoint (v1.8+) |
 | `CODE_SEARCH_HMAC_SECRET` | — | Request-signing secret (required) |
 | `REPO_ROOT` | `~/.hermes/repos` | Local repo mirrors for `/code-repos`, `/code-sync` |
 | `SOURCEVAULT_CODE_TOOLS_DEBUG` | off | Log argument shapes (no secrets) |

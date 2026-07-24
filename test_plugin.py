@@ -53,7 +53,7 @@ class TestRegistration(unittest.TestCase):
 
         base_commands = [
             "code-help", "code-read", "code-search", "code-context",
-            "code-ask", "code-status", "code-repos", "code-sync",
+            "code-ask", "code-history", "code-status", "code-repos", "code-sync",
         ]
         for name in base_commands:
             self.assertIn(name, ctx.commands, f"missing hyphen command {name}")
@@ -293,3 +293,118 @@ class TestAskCommandForms(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class HistoryToolTests(unittest.TestCase):
+    def test_history_tools_registered(self):
+        ctx = StubCtx()
+        plugin.register(ctx)
+        for name in ("code_history", "sourcevault_history"):
+            self.assertIn(name, ctx.tools, f"missing history tool {name}")
+            schema = ctx.tools[name]["schema"]
+            self.assertEqual(schema["parameters"]["required"], ["repo_name", "question"])
+
+    def test_handle_code_history_posts_expected_body(self):
+        captured = {}
+
+        def fake_post(url, body):
+            captured["url"] = url
+            captured["body"] = body
+            return json.dumps({"success": True, "ok": True, "results": []})
+
+        original = plugin.tools._post_signed_json
+        plugin.tools._post_signed_json = fake_post
+        try:
+            plugin.handle_code_history(
+                {"repo_name": "myrepo", "question": "when did auth change", "n_results": "3"}
+            )
+        finally:
+            plugin.tools._post_signed_json = original
+
+        self.assertTrue(captured["url"].endswith("/api/history-search"))
+        self.assertEqual(
+            captured["body"],
+            {"repo_name": "myrepo", "question": "when did auth change", "n_results": 3},
+        )
+
+    def test_handle_code_history_accepts_query_alias(self):
+        captured = {}
+
+        def fake_post(url, body):
+            captured["body"] = body
+            return json.dumps({"success": True, "ok": True, "results": []})
+
+        original = plugin.tools._post_signed_json
+        plugin.tools._post_signed_json = fake_post
+        try:
+            plugin.handle_code_history({"repo_name": "myrepo", "query": "why refactor"})
+        finally:
+            plugin.tools._post_signed_json = original
+
+        self.assertEqual(captured["body"]["question"], "why refactor")
+
+    def test_handle_code_history_translates_missing_route(self):
+        original = plugin.tools._post_signed_json
+        plugin.tools._post_signed_json = lambda url, body: "<html>Cannot POST /api/history-search</html>"
+        try:
+            result = json.loads(plugin.handle_code_history({"repo_name": "r", "question": "q"}))
+        finally:
+            plugin.tools._post_signed_json = original
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"], "history_search_unsupported")
+        self.assertIn("v1.8", result["detail"])
+
+    def test_format_history_command_output(self):
+        payload = json.dumps({
+            "success": True,
+            "ok": True,
+            "summary": "Found 2 matching commits",
+            "results": [
+                {
+                    "short": "abc1234",
+                    "date": "2026-01-02",
+                    "author": "Dev One",
+                    "subject": "fix: tighten header parsing",
+                    "preview": "commit abc1234 (2026-01-02) by Dev One fix: tighten header parsing",
+                    "ai_authored": True,
+                },
+                {
+                    "commit": "def5678901234",
+                    "date": "2026-01-01",
+                    "author": "Dev Two",
+                    "subject": "refactor router",
+                    "preview": "",
+                },
+            ],
+        })
+        text = plugin.formatting._format_history_command_output(payload)
+        self.assertIn("Found 2 matching commits", text)
+        self.assertIn("#1 abc1234 (2026-01-02) Dev One [ai]", text)
+        self.assertIn("  fix: tighten header parsing", text)
+        self.assertIn("#2 def5678 (2026-01-01) Dev Two", text)
+        self.assertNotIn("def5678 (2026-01-01) Dev Two [ai]", text)
+
+    def test_history_command_usage_and_wiring(self):
+        usage = plugin.commands._handle_code_history_command("")
+        self.assertIn("Usage: /code-history", usage)
+
+        captured = {}
+
+        def fake_post(url, body):
+            captured["body"] = body
+            return json.dumps({
+                "success": True, "ok": True, "summary": "Found 1 matching commit",
+                "results": [{"short": "aaa1111", "date": "2026-02-03", "author": "A", "subject": "s"}],
+            })
+
+        original = plugin.tools._post_signed_json
+        plugin.tools._post_signed_json = fake_post
+        try:
+            out = plugin.commands._handle_code_history_command('myrepo "when did tests move" 2')
+        finally:
+            plugin.tools._post_signed_json = original
+
+        self.assertEqual(captured["body"]["n_results"], 2)
+        self.assertIn("Found 1 matching commit", out)
+        self.assertIn("#1 aaa1111", out)

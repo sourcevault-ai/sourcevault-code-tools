@@ -14,6 +14,7 @@ import uuid
 
 DEFAULT_SEARCH_URL = "http://127.0.0.1:9000/api/search-codebase"
 DEFAULT_READ_FILE_URL = "http://127.0.0.1:9000/api/read-file"
+DEFAULT_HISTORY_URL = "http://127.0.0.1:9000/api/history-search"
 logger = logging.getLogger("sourcevault_code_tools")
 
 
