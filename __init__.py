@@ -3,7 +3,7 @@
 Package layout:
     helpers.py     parameter/naming helpers (pure)
     formatting.py  response parsing and output formatting (pure)
-    http.py        HMAC-signed transport to the SourceVault API
+    transport.py   HMAC-signed transport to the SourceVault API
     tools.py       LLM-callable tool schemas and handlers
     commands.py    deterministic slash-command handlers
 

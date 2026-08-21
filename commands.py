@@ -331,15 +331,23 @@ def _handle_code_status_command(raw_args):
         return f"sourcevault: FAIL {error}\nsearch_url: {search_url}\nread_file_url: {read_url}"
 
     secret_state = "set" if os.environ.get("CODE_SEARCH_HMAC_SECRET") else "missing"
-    return "\n".join(
-        [
-            "sourcevault: OK",
-            f"health: {body}",
-            f"search_url: {search_url}",
-            f"read_file_url: {read_url}",
-            f"code_search_hmac_secret: {secret_state}",
-        ]
-    )
+    agent_name = os.environ.get("SOURCEVAULT_AGENT_NAME", "").strip()
+    agent_token_set = bool(os.environ.get("SOURCEVAULT_AGENT_TOKEN", "").strip())
+    lines = [
+        "sourcevault: OK",
+        f"health: {body}",
+        f"search_url: {search_url}",
+        f"read_file_url: {read_url}",
+        f"code_search_hmac_secret: {secret_state}",
+        f"agent_name: {agent_name or '(not set — signing as shared-secret)'}",
+        f"agent_token: {'set' if agent_token_set else 'missing'}",
+    ]
+    if bool(agent_name) != agent_token_set:
+        lines.append(
+            "warning: agent identity needs BOTH SOURCEVAULT_AGENT_NAME and "
+            "SOURCEVAULT_AGENT_TOKEN; falling back to the shared secret"
+        )
+    return "\n".join(lines)
 
 
 def _handle_code_repos_command(raw_args):

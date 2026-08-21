@@ -3,7 +3,7 @@
 import json
 import os
 
-from .formatting import _read_file_content_or_result
+from .formatting import _error_hint, _extract_json_object, _read_file_content_or_result
 from .helpers import _params, _positive_int, _relative_path, _repo_name
 from .transport import (
     DEFAULT_HISTORY_URL,
@@ -120,7 +120,7 @@ def _register_code_history_tool(ctx, name):
     description = (
         "SourceVault git-history search. Answers questions about a repo's commit history "
         "(when something changed, why, by whom) from the locally indexed history. "
-        "Requires SourceVault v1.8 or newer."
+        "Requires the SourceVault history index (enable Full git history in the dashboard)."
     )
     ctx.register_tool(
         name=name,
@@ -168,18 +168,20 @@ def handle_code_history(params=None, **kwargs):
         os.environ.get("CODE_HISTORY_URL", DEFAULT_HISTORY_URL),
         body,
     )
-    # An older SourceVault has no /api/history-search; express answers with a
-    # "Cannot POST" page instead of JSON. Translate that into advice.
-    if isinstance(result, str) and "Cannot POST" in result:
-        return json.dumps(
-            {
-                "success": False,
-                "ok": False,
-                "error": "history_search_unsupported",
-                "detail": "This SourceVault does not serve /api/history-search. Upgrade to v1.8 or newer.",
-            },
-            separators=(",", ":"),
-        )
+    # An older SourceVault has no /api/history-search; express answers 404 with
+    # a non-JSON page, which the transport reports as a plain
+    # sourcevault_http_error. A 404 from the route itself is structured
+    # (error == "repo_not_found") and passes through untouched.
+    parsed = _extract_json_object(result) if isinstance(result, str) else {}
+    if parsed.get("error") == "sourcevault_http_error" and parsed.get("status") == 404:
+        unsupported = {
+            "success": False,
+            "ok": False,
+            "error": "history_search_unsupported",
+            "detail": "This SourceVault does not serve /api/history-search. Update SourceVault.",
+        }
+        unsupported["hint"] = _error_hint(unsupported)
+        return json.dumps(unsupported, separators=(",", ":"))
     return result
 
 

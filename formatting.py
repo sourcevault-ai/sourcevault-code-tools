@@ -3,6 +3,73 @@
 import json
 
 
+# One-line actionable messages for the machine API's structured error codes
+# (services/security/hmac-guard.js, services/util/http.js sendError, and the
+# machine API rate limiter). Unknown codes stay unmapped so callers keep the
+# raw JSON envelope exactly as before.
+_ERROR_HINTS = {
+    "timestamp_required": (
+        "Server requires timestamped signatures (SourceVault v1.28+); "
+        "update this plugin to v1.4 or newer."
+    ),
+    "stale_timestamp": (
+        "Signature timestamp outside the accepted window; "
+        "check clock sync between the Hermes and SourceVault hosts."
+    ),
+    "bad_timestamp": "Signature timestamp header is not a number; update this plugin.",
+    "missing_nonce": "Signature nonce header missing; update this plugin.",
+    "replayed_nonce": "Signature nonce already used; retry the request.",
+    "bad_signature": (
+        "Signature rejected: CODE_SEARCH_HMAC_SECRET (or the agent token) "
+        "does not match the server."
+    ),
+    "signature_secret_required": (
+        "Server requires a signing secret; set CODE_SEARCH_HMAC_SECRET "
+        "on the SourceVault server and in the Hermes environment."
+    ),
+    "unknown_agent": (
+        "Agent not recognized by the server (revoked, mistyped, or never minted); "
+        "check SOURCEVAULT_AGENT_NAME/SOURCEVAULT_AGENT_TOKEN or re-mint with: "
+        "sourcevault agent mint <name> --surfaces http"
+    ),
+    "agent_scope": (
+        "This agent token is not scoped to the http surface; "
+        "re-mint it with --surfaces http."
+    ),
+    "agent_repo_scope": (
+        "This agent token is not scoped to that repository; check its --repos grant."
+    ),
+    "rate_limited": "Rate limited by the server; retry shortly.",
+    "missing_repo_name": "repo_name is required; run /code-repos to list exact names.",
+    "invalid_repo_name": (
+        "Invalid repo_name; run /code-repos to list exact (case-sensitive) names."
+    ),
+    "repo_not_found": (
+        "Repository not indexed under REPO_ROOT; run /code-repos to list repos."
+    ),
+    "question_too_long": "Question exceeds the server's maximum length; shorten it.",
+    "history_search_unsupported": (
+        "This SourceVault does not serve /api/history-search; update SourceVault."
+    ),
+}
+
+
+def _error_hint(payload):
+    code = str(payload.get("error") or "")
+    if code == "rate_limited" and payload.get("retry_after"):
+        return f"Rate limited by the server; retry after {payload['retry_after']}s."
+    return _ERROR_HINTS.get(code, "")
+
+
+def _error_command_output(parsed, raw):
+    """One-line human message for a failed machine-API result, or raw passthrough."""
+    hint = str(parsed.get("hint") or "") or _error_hint(parsed)
+    if not hint:
+        return raw
+    code = parsed.get("error") or "error"
+    return f"SourceVault error ({code}): {hint}"
+
+
 def _extract_json_object(text):
     if not text:
         return {}
@@ -66,6 +133,9 @@ def _read_file_command_output(result):
     if parsed.get("ok") is True and isinstance(parsed.get("content"), str):
         return parsed["content"]
 
+    if parsed.get("ok") is False or parsed.get("success") is False:
+        return _error_command_output(parsed, result)
+
     return result
 
 
@@ -79,7 +149,7 @@ def _format_history_command_output(result):
         return result
 
     if parsed.get("ok") is False or parsed.get("success") is False:
-        return result
+        return _error_command_output(parsed, result)
 
     results = parsed.get("results") or []
     lines = [
@@ -117,7 +187,7 @@ def _format_search_command_output(result):
         return result
 
     if parsed.get("ok") is False or parsed.get("success") is False:
-        return result
+        return _error_command_output(parsed, result)
 
     results = parsed.get("results") or []
     lines = [
@@ -229,7 +299,7 @@ def _parse_successful_search_result(result):
         return result
 
     if parsed.get("ok") is False or parsed.get("success") is False:
-        return result
+        return _error_command_output(parsed, result)
 
     return parsed
 

@@ -10,11 +10,18 @@ submodule_search_locations), so it works for both the current single-file
 layout and a future multi-module package using relative imports.
 """
 
+import email.message
+import hashlib
+import hmac
 import importlib.util
+import io
 import json
+import os
 import pathlib
 import sys
 import unittest
+import urllib.error
+import urllib.request
 
 PLUGIN_DIR = pathlib.Path(__file__).resolve().parent
 _spec = importlib.util.spec_from_file_location(
@@ -291,10 +298,6 @@ class TestAskCommandForms(unittest.TestCase):
         self.assertEqual(self.calls[0]["query"], "404")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
-
 class HistoryToolTests(unittest.TestCase):
     def test_history_tools_registered(self):
         ctx = StubCtx()
@@ -344,8 +347,17 @@ class HistoryToolTests(unittest.TestCase):
         self.assertEqual(captured["body"]["question"], "why refactor")
 
     def test_handle_code_history_translates_missing_route(self):
+        # A server without the route answers 404 with a non-JSON page, which the
+        # transport reports as a plain sourcevault_http_error envelope.
+        missing_route = json.dumps({
+            "success": False,
+            "ok": False,
+            "error": "sourcevault_http_error",
+            "status": 404,
+            "detail": "<html>Cannot POST /api/history-search</html>",
+        })
         original = plugin.tools._post_signed_json
-        plugin.tools._post_signed_json = lambda url, body: "<html>Cannot POST /api/history-search</html>"
+        plugin.tools._post_signed_json = lambda url, body: missing_route
         try:
             result = json.loads(plugin.handle_code_history({"repo_name": "r", "question": "q"}))
         finally:
@@ -353,7 +365,27 @@ class HistoryToolTests(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertEqual(result["error"], "history_search_unsupported")
-        self.assertIn("v1.8", result["detail"])
+        self.assertIn("/api/history-search", result["detail"])
+        self.assertTrue(result["hint"])
+
+    def test_handle_code_history_keeps_structured_not_found(self):
+        # A structured 404 from the route itself (repo_not_found) must pass
+        # through untouched, not be mislabeled as an unsupported route.
+        raw = json.dumps({
+            "success": False,
+            "ok": False,
+            "error": "repo_not_found",
+            "status": 404,
+            "detail": "no such repo",
+        })
+        original = plugin.tools._post_signed_json
+        plugin.tools._post_signed_json = lambda url, body: raw
+        try:
+            result = plugin.handle_code_history({"repo_name": "r", "question": "q"})
+        finally:
+            plugin.tools._post_signed_json = original
+
+        self.assertEqual(json.loads(result)["error"], "repo_not_found")
 
     def test_format_history_command_output(self):
         payload = json.dumps({
@@ -408,3 +440,238 @@ class HistoryToolTests(unittest.TestCase):
         self.assertEqual(captured["body"]["n_results"], 2)
         self.assertIn("Found 1 matching commit", out)
         self.assertIn("#1 aaa1111", out)
+
+
+class _FakeHttpResponse:
+    def __init__(self, body=b"{}"):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+_SIGNING_ENV_KEYS = (
+    "CODE_SEARCH_HMAC_SECRET",
+    "SOURCEVAULT_AGENT_NAME",
+    "SOURCEVAULT_AGENT_TOKEN",
+)
+
+
+class _SigningEnvMixin:
+    """Clears the signing env vars for the test and restores them after."""
+
+    def setUp(self):
+        self._saved_env = {key: os.environ.get(key) for key in _SIGNING_ENV_KEYS}
+        for key in _SIGNING_ENV_KEYS:
+            os.environ.pop(key, None)
+
+    def tearDown(self):
+        for key, value in self._saved_env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+
+class TransportSigningTests(_SigningEnvMixin, unittest.TestCase):
+    URL = "http://127.0.0.1:9000/api/search-codebase"
+
+    def _post_capturing_request(self):
+        captured = {}
+
+        def fake_urlopen(request, timeout=None):
+            captured["request"] = request
+            return _FakeHttpResponse()
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            plugin.transport._post_signed_json(self.URL, {"a": 1})
+        finally:
+            urllib.request.urlopen = original
+        return captured["request"]
+
+    def test_timestamped_signature_construction(self):
+        os.environ["CODE_SEARCH_HMAC_SECRET"] = "s3cret"
+        request = self._post_capturing_request()
+
+        timestamp = request.get_header("X-code-search-signature-timestamp")
+        nonce = request.get_header("X-code-search-signature-nonce")
+        self.assertTrue(timestamp and timestamp.isdigit(), "timestamp must be ms epoch")
+        self.assertTrue(nonce)
+
+        signed = f"{timestamp}.{nonce}.".encode("utf-8") + request.data
+        expected = hmac.new(b"s3cret", signed, hashlib.sha256).hexdigest()
+        self.assertEqual(request.get_header("X-code-search-signature"), f"sha256={expected}")
+        self.assertIsNone(request.get_header("X-code-search-signature-agent"))
+
+    def test_agent_key_signing_and_header(self):
+        # Shared secret also set, proving the agent key takes precedence.
+        os.environ["CODE_SEARCH_HMAC_SECRET"] = "s3cret"
+        os.environ["SOURCEVAULT_AGENT_NAME"] = "hermes-gw"
+        os.environ["SOURCEVAULT_AGENT_TOKEN"] = "sva_abc"
+        request = self._post_capturing_request()
+
+        self.assertEqual(request.get_header("X-code-search-signature-agent"), "hermes-gw")
+        timestamp = request.get_header("X-code-search-signature-timestamp")
+        nonce = request.get_header("X-code-search-signature-nonce")
+        # The server keeps sha256(token) and signs with the hex STRING as key.
+        key = hashlib.sha256(b"sva_abc").hexdigest().encode("utf-8")
+        signed = f"{timestamp}.{nonce}.".encode("utf-8") + request.data
+        expected = hmac.new(key, signed, hashlib.sha256).hexdigest()
+        self.assertEqual(request.get_header("X-code-search-signature"), f"sha256={expected}")
+
+    def test_partial_agent_config_falls_back_to_shared_secret(self):
+        os.environ["CODE_SEARCH_HMAC_SECRET"] = "s3cret"
+        os.environ["SOURCEVAULT_AGENT_TOKEN"] = "sva_abc"
+        request = self._post_capturing_request()
+
+        self.assertIsNone(request.get_header("X-code-search-signature-agent"))
+        timestamp = request.get_header("X-code-search-signature-timestamp")
+        nonce = request.get_header("X-code-search-signature-nonce")
+        signed = f"{timestamp}.{nonce}.".encode("utf-8") + request.data
+        expected = hmac.new(b"s3cret", signed, hashlib.sha256).hexdigest()
+        self.assertEqual(request.get_header("X-code-search-signature"), f"sha256={expected}")
+
+    def test_unsigned_when_no_secret(self):
+        request = self._post_capturing_request()
+        self.assertIsNone(request.get_header("X-code-search-signature"))
+        self.assertIsNone(request.get_header("X-code-search-signature-timestamp"))
+        self.assertIsNone(request.get_header("X-code-search-signature-agent"))
+
+
+class TransportErrorTests(_SigningEnvMixin, unittest.TestCase):
+    URL = "http://127.0.0.1:9000/api/search-codebase"
+
+    def _post_with_error(self, code, body, headers=None):
+        hdrs = email.message.Message()
+        for key, value in (headers or {}).items():
+            hdrs[key] = value
+
+        def fake_urlopen(request, timeout=None):
+            raise urllib.error.HTTPError(self.URL, code, "err", hdrs, io.BytesIO(body))
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            return json.loads(plugin.transport._post_signed_json(self.URL, {"a": 1}))
+        finally:
+            urllib.request.urlopen = original
+
+    def test_structured_error_code_preserved(self):
+        body = json.dumps({
+            "success": False, "ok": False,
+            "error": "unknown_agent", "detail": "agent not recognized",
+        }).encode("utf-8")
+        result = self._post_with_error(401, body)
+
+        self.assertEqual(result["error"], "unknown_agent")
+        self.assertEqual(result["status"], 401)
+        self.assertIn("SOURCEVAULT_AGENT", result["hint"])
+
+    def test_429_captures_retry_after(self):
+        body = json.dumps({"success": False, "ok": False, "error": "rate_limited"}).encode("utf-8")
+        result = self._post_with_error(429, body, {"Retry-After": "60"})
+
+        self.assertEqual(result["error"], "rate_limited")
+        self.assertEqual(result["retry_after"], "60")
+        self.assertIn("60", result["hint"])
+
+    def test_non_json_error_body_degrades(self):
+        result = self._post_with_error(404, b"<html>Cannot POST /api/x</html>")
+
+        self.assertEqual(result["error"], "sourcevault_http_error")
+        self.assertEqual(result["status"], 404)
+        self.assertIn("Cannot POST", result["detail"])
+        self.assertNotIn("hint", result)
+
+    def test_network_failure_envelope(self):
+        def fake_urlopen(request, timeout=None):
+            raise OSError("connection refused")
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            result = json.loads(plugin.transport._post_signed_json(self.URL, {"a": 1}))
+        finally:
+            urllib.request.urlopen = original
+
+        self.assertEqual(result["error"], "sourcevault_request_failed")
+        self.assertIn("connection refused", result["detail"])
+
+
+class ErrorMappingTests(unittest.TestCase):
+    def test_search_output_renders_rate_limit_hint(self):
+        raw = json.dumps({"ok": False, "success": False, "error": "rate_limited", "retry_after": "30"})
+        out = plugin._format_search_command_output(raw)
+        self.assertIn("rate_limited", out)
+        self.assertIn("30", out)
+
+    def test_unknown_error_code_passes_raw_through(self):
+        raw = json.dumps({"ok": False, "success": False, "error": "totally_unknown"})
+        self.assertEqual(plugin._format_search_command_output(raw), raw)
+
+    def test_read_output_renders_agent_repo_scope_hint(self):
+        raw = json.dumps({"ok": False, "error": "agent_repo_scope"})
+        out = plugin._read_file_command_output(raw)
+        self.assertIn("agent_repo_scope", out)
+        self.assertIn("--repos", out)
+
+    def test_history_output_renders_unsupported_hint(self):
+        raw = json.dumps({"ok": False, "error": "history_search_unsupported"})
+        out = plugin.formatting._format_history_command_output(raw)
+        self.assertIn("history_search_unsupported", out)
+        self.assertIn("/api/history-search", out)
+
+    def test_context_failure_renders_hint_string(self):
+        raw = json.dumps({"ok": False, "error": "timestamp_required"})
+        out = plugin._format_context_command_output(raw)
+        self.assertIsInstance(out, str)
+        self.assertIn("timestamp_required", out)
+
+
+class StatusCommandTests(_SigningEnvMixin, unittest.TestCase):
+    def _status_output(self):
+        def fake_urlopen(url, timeout=None):
+            return _FakeHttpResponse(b'{"ok":true}')
+
+        original = urllib.request.urlopen
+        urllib.request.urlopen = fake_urlopen
+        try:
+            return plugin.commands._handle_code_status_command("")
+        finally:
+            urllib.request.urlopen = original
+
+    def test_status_reports_agent_identity(self):
+        os.environ["CODE_SEARCH_HMAC_SECRET"] = "s3cret"
+        os.environ["SOURCEVAULT_AGENT_NAME"] = "hermes-gw"
+        os.environ["SOURCEVAULT_AGENT_TOKEN"] = "sva_abc"
+        out = self._status_output()
+
+        self.assertIn("agent_name: hermes-gw", out)
+        self.assertIn("agent_token: set", out)
+        self.assertNotIn("warning:", out)
+
+    def test_status_warns_on_partial_agent_config(self):
+        os.environ["SOURCEVAULT_AGENT_NAME"] = "hermes-gw"
+        out = self._status_output()
+
+        self.assertIn("agent_token: missing", out)
+        self.assertIn("warning: agent identity needs BOTH", out)
+
+    def test_status_without_agent_reports_shared_secret(self):
+        os.environ["CODE_SEARCH_HMAC_SECRET"] = "s3cret"
+        out = self._status_output()
+
+        self.assertIn("signing as shared-secret", out)
+        self.assertNotIn("warning:", out)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

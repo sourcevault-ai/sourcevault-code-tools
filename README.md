@@ -32,7 +32,7 @@ Works in Hermes CLI, Telegram, and Hermes Desktop.
 | `/code-search <repo> "query"` | Hybrid semantic + literal search |
 | `/code-context <repo> "query"` | Retrieve a compact context pack |
 | `/code-ask <repo> "question"` | Retrieve + answer with citations (add an optional `"query"` before the question to steer retrieval) |
-| `/code-history <repo> "question"` | Search indexed git commit history (SourceVault v1.8+; index every commit via the dashboard's Full git history setting) |
+| `/code-history <repo> "question"` | Search indexed git commit history (requires the SourceVault history index; enable *Full git history* in the dashboard to index every commit) |
 
 Telegram uses underscore forms (`/code_ask`, …).
 
@@ -75,8 +75,8 @@ If you have the SourceVault server repo, use its installer instead — it also
 configures Hermes and validates the env:
 
 ```bash
-cd ~/Development/sourcevault
-./scripts/install-hermes-integration.sh --configure-sourcevault --restart-hermes
+cd ~/DevOps/sourcevault
+./scripts/setup/install-hermes-integration.sh --configure-sourcevault --restart-hermes
 ```
 
 Enable in `~/.hermes/config.yaml`:
@@ -93,8 +93,10 @@ platform_toolsets:
     - sourcevault_code_tools
 ```
 
-Point the gateway at your SourceVault instance
-(`~/.config/systemd/user/hermes-gateway.env` or equivalent):
+Point the gateway at your SourceVault instance. On Linux that is
+`~/.config/systemd/user/hermes-gateway.env`; on macOS put the same variables in
+the environment of whatever launches the gateway (a launchd plist's
+`EnvironmentVariables`, or the shell profile that starts Hermes Desktop):
 
 ```env
 CODE_SEARCH_URL=http://127.0.0.1:9000/api/search-codebase
@@ -103,8 +105,16 @@ CODE_HISTORY_URL=http://127.0.0.1:9000/api/history-search
 CODE_SEARCH_HMAC_SECRET=<same value as the SourceVault server>
 ```
 
-Restart Hermes (`systemctl --user restart hermes-gateway` or relaunch the
-Desktop app) and run `/code-status`.
+To attribute requests to a named agent in SourceVault's audit chain (v1.47+),
+mint a token with `sourcevault agent mint <name> --surfaces http` and add both:
+
+```env
+SOURCEVAULT_AGENT_NAME=<agent name>
+SOURCEVAULT_AGENT_TOKEN=<sva_... token printed at mint time>
+```
+
+Restart Hermes (`systemctl --user restart hermes-gateway` on Linux, or
+relaunch the Desktop app on macOS) and run `/code-status`.
 
 ## Try it
 
@@ -150,14 +160,20 @@ Usage notes:
 |---|---|---|
 | `CODE_SEARCH_URL` | `http://127.0.0.1:9000/api/search-codebase` | SourceVault search endpoint |
 | `CODE_READ_FILE_URL` | `http://127.0.0.1:9000/api/read-file` | SourceVault file-read endpoint |
-| `CODE_HISTORY_URL` | `http://127.0.0.1:9000/api/history-search` | SourceVault history-search endpoint (v1.8+) |
-| `CODE_SEARCH_HMAC_SECRET` | — | Request-signing secret (required) |
+| `CODE_HISTORY_URL` | `http://127.0.0.1:9000/api/history-search` | SourceVault history-search endpoint |
+| `CODE_SEARCH_HMAC_SECRET` | — | Shared request-signing secret (required unless an agent identity is set) |
+| `SOURCEVAULT_AGENT_NAME` | — | Named agent identity, sent as `X-Code-Search-Signature-Agent` (mint with `sourcevault agent mint <name> --surfaces http`) |
+| `SOURCEVAULT_AGENT_TOKEN` | — | The agent's plaintext token (`sva_…`); the plugin signs with a key derived from it instead of the shared secret. Both agent vars are required together |
 | `REPO_ROOT` | `~/.hermes/repos` | Local repo mirrors for `/code-repos`, `/code-sync` |
 | `SOURCEVAULT_CODE_TOOLS_DEBUG` | off | Log argument shapes (no secrets) |
 
 ## Security notes
 
 - All requests are HMAC-signed and travel over localhost only.
+- Signatures are timestamped and nonce-protected (SourceVault v1.28+ requires
+  this), so a captured request cannot be replayed. With an agent token
+  configured, every request is attributed to that agent in the server's audit
+  chain instead of the shared secret.
 - The plugin never executes retrieved code; `/code-sync` runs only
   `git pull --ff-only` inside the configured repo root.
 - Repo paths are confined to `REPO_ROOT`; traversal attempts are rejected.
