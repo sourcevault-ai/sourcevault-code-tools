@@ -629,6 +629,17 @@ class ErrorMappingTests(unittest.TestCase):
         self.assertIn("history_search_unsupported", out)
         self.assertIn("/api/history-search", out)
 
+    def test_licensing_denials_render_hints(self):
+        for code, needle in (
+            ("trial_expired", "v1.55"),
+            ("license_required", "Settings -> License"),
+            ("updates_window_ended", "update window"),
+        ):
+            raw = json.dumps({"ok": False, "success": False, "error": code})
+            out = plugin._format_search_command_output(raw)
+            self.assertIn(code, out)
+            self.assertIn(needle, out)
+
     def test_context_failure_renders_hint_string(self):
         raw = json.dumps({"ok": False, "error": "timestamp_required"})
         out = plugin._format_context_command_output(raw)

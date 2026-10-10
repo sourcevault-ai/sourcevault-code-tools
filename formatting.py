@@ -51,6 +51,22 @@ _ERROR_HINTS = {
     "history_search_unsupported": (
         "This SourceVault does not serve /api/history-search; update SourceVault."
     ),
+    # Licensing denials. A SourceVault from 2026-10-09 (v1.55) onward never
+    # refuses search, reads, or history: the engine is free on one repository
+    # after the trial. Older servers still answer 403 with these codes.
+    "trial_expired": (
+        "The SourceVault trial has ended on this server; update SourceVault to "
+        "v1.55 or newer (the engine is free after the trial) or enter a key in "
+        "the dashboard (Settings -> License)."
+    ),
+    "license_required": (
+        "This action needs a SourceVault license; enter a key in the dashboard "
+        "(Settings -> License) or update SourceVault to v1.55 or newer."
+    ),
+    "updates_window_ended": (
+        "This SourceVault build is newer than the license's update window; "
+        "renew updates at https://sourcevault.ai/#pricing or reinstall a covered version."
+    ),
 }
 
 
